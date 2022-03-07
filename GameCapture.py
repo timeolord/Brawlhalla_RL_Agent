@@ -7,7 +7,9 @@ import win32con
 
 
 class GameCapture:
-    def __init__(self, game_name, pos_x, pos_y, width, height):
+    def __init__(self, game_name, pos_x, pos_y, width, height, res_div):
+        self.resolution = (pos_x + width, pos_y + height)
+        self.output_resolution = (int(width / res_div), int(height / res_div))
         # Find game HWND
         self.game_hwnd = win32gui.FindWindow(None, game_name)
 
@@ -42,6 +44,11 @@ class GameCapture:
 
             # Convert to grayscale
             img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            # Downscale
+            img = cv2.resize(img, self.output_resolution)
+
+            img = numpy.swapaxes(img, 0, 1)
+            img = numpy.expand_dims(img, 2)
 
             # Display the picture
             cv2.imshow("OpenCV/Numpy normal", img)
@@ -64,6 +71,11 @@ class GameCapture:
 
         # Convert to grayscale
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        # Downscale
+        img = cv2.resize(img, self.output_resolution)
+
+        img = numpy.swapaxes(img, 0, 1)
+        img = numpy.expand_dims(img, 2)
 
         """
                 while True:

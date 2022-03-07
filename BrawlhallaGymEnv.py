@@ -7,41 +7,57 @@ from gym import spaces
 import GameCapture
 import gym
 import pydirectinput
+import threading
+
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
+
+
+def pressAndHold(key):
+    pydirectinput.keyDown(key)
+    pydirectinput.keyUp(key)
 
 
 class BrawlhallaEnv(gym.Env):
     def __init__(self):
+        # Starts a dummy thread for input control
+        self.clicker = threading.Thread(target=pydirectinput.press, args=('',))
+        self.clicker.start()
+
         self.resolution = (848, 480)
+        self.res_div = 4
+        self.model_resolution = (int(self.resolution[0] / self.res_div), int(self.resolution[1] / self.res_div))
         
-        self.gc = GameCapture.GameCapture("Brawlhalla", 0, 0, *self.resolution)
+        self.gc = GameCapture.GameCapture("Brawlhalla", 0, 0, *self.resolution, self.res_div)
         self.number_actions = 8
         self.action_space = spaces.Discrete(self.number_actions)
-        self.observation_space = spaces.Box(low=0, high=255, shape=(self.resolution[1], self.resolution[0]),
+        self.observation_space = spaces.Box(low=0, high=255,
+                                            shape=(self.model_resolution[0], self.model_resolution[1], 1),
                                             dtype=np.uint8)
 
-        # From main menu to custom lobby
-        pydirectinput.click(*(176, 362))
-        pydirectinput.click(*(172, 362))
+        # Main Menu -> Offline Play
+        pydirectinput.press('down')
+        pydirectinput.press('down')
+        pydirectinput.press('down')
+        pydirectinput.press('down')
+        pydirectinput.press('down')
+        # Custom Game
+        pydirectinput.press('enter')
+        pydirectinput.press('enter')
         # Remove third bot
-        time.sleep(0.1)
-        pydirectinput.click(*(65, 171))
-        pydirectinput.click(*(54, 183))
-        time.sleep(0.05)
+        pydirectinput.press('v')
+        pydirectinput.press('enter')
+        pydirectinput.press('enter')
         # Remove fourth bot
-        pydirectinput.click(*(65, 171))
-        pydirectinput.click(*(54, 183))
+        pydirectinput.press('enter')
+        pydirectinput.press('enter')
+        pydirectinput.press('v')
+        self.done_pixel = self.gc.captureBox(100, 80, 101, 81)
 
     def reset(self):
-        print("Resetting")
-        # Select Char
-        pydirectinput.click(*(160, 106), clicks=2, interval=0.1)
-        time.sleep(1)
-        pydirectinput.click(*(160, 106), clicks=2, interval=0.1)
         # Start Game
-        time.sleep(1)
-        pydirectinput.press('c', presses=5, interval=0.1)
+        pydirectinput.press('enter', presses=10)
         # Wait for loading screen
-        time.sleep(10)
+        time.sleep(5)
 
         return self.gc.capture()
 
@@ -50,11 +66,11 @@ class BrawlhallaEnv(gym.Env):
         info = {}
 
         # Checks if done by checking the background
-        if numpy.array_equal(self.gc.captureBox(100, 80, 101, 81), [[[34, 4, 0, 255]]]):
+        if numpy.array_equal(self.gc.captureBox(100, 80, 101, 81), self.done_pixel):
             done = True
 
             # Calculates the reward from the end screen
-
+            win = 0
             # Reads higher player number
             higher_player_num = (self.readArea(320, 327, 347, 338, 100, 5)).lstrip()
             # Reads lower player number
@@ -71,11 +87,11 @@ class BrawlhallaEnv(gym.Env):
                 try:
                     damage_taken = float(damage_taken.replace("O", '0'))
                 except ValueError:
-                    damage_done = 0
+                    damage_taken = 0
             elif "Player 1" in higher_player_num:
                 # Reverses the numbers if player 1 wins, since damage taken by the enemy is the same as damage done
                 # by the player
-                # Reads Damage Done by the lower playercv
+                # Reads Damage Done by the lower player
                 damage_taken = self.readArea(545, 428, 570, 437, 190, 4)
                 try:
                     damage_taken = float(damage_taken.replace("O", '0'))
@@ -87,6 +103,7 @@ class BrawlhallaEnv(gym.Env):
                     damage_done = float(damage_done.replace("O", '0'))
                 except ValueError:
                     damage_done = 0
+                win = 1
             else:
                 damage_done = 0
                 damage_taken = 0
@@ -94,36 +111,44 @@ class BrawlhallaEnv(gym.Env):
 
             # Discounts the damage taken by half, to avoid extremely negative values and divides by 100 to keep
             # values around 1 and -1
-            reward = (damage_done/100) + 0.01
-            print(reward)
+            reward = (damage_done/100)
+            reward += win
+            # print(reward)
 
-            time.sleep(1)
             # Leaves the end screen
-            pydirectinput.click(*(160, 106))
-            pydirectinput.press('c', presses=5, interval=0.1)
-            # Lets the game go back to character select
-            time.sleep(1)
+            pydirectinput.press('c', presses=3, _pause=False)
         else:
-            done = False
-            reward = 0
-            if action == 0:
-                pydirectinput.press('up')
-            elif action == 1:
-                pydirectinput.press('down')
-            elif action == 2:
-                pydirectinput.press('left')
-            elif action == 3:
-                pydirectinput.press('right')
-            elif action == 4:
-                pydirectinput.press('z')
-            elif action == 5:
-                pydirectinput.press('x')
-            elif action == 6:
-                pydirectinput.press('c')
-            elif action == 7:
-                pydirectinput.press('v')
 
-        time.sleep(0.1)
+            done = False
+            # Encourages just being alive
+            reward = 0.00001
+            button = ''
+            if action == 0:
+                button = 'up'
+            elif action == 1:
+                button = 'down'
+            elif action == 2:
+                button = 'left'
+            elif action == 3:
+                button = 'right'
+            elif action == 4:
+                button = 'z'
+            elif action == 5:
+                button = 'x'
+            elif action == 6:
+                button = 'c'
+            elif action == 7:
+                button = 'v'
+
+            if button != '':
+                if button != 'left' and button != 'right':
+                    self.clicker = threading.Thread(target=pydirectinput.press, args=(button,), name="t")
+                else:
+                    if self.clicker.name == "h":
+                        self.clicker.join()
+                    self.clicker = threading.Thread(target=pressAndHold, args=(button,), name="h")
+
+            self.clicker.start()
 
         return self.gc.capture(), reward, done, info
 
